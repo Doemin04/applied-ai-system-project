@@ -88,23 +88,32 @@ def main() -> None:
     parser.add_argument('--tempo', type=float, help='Target tempo in BPM (e.g., 80)')
     parser.add_argument('-k', type=int, default=5, help='How many recommendations to show')
     parser.add_argument('--interactive', action='store_true', help='Prompt for a small profile interactively')
+    parser.add_argument(
+        '--show-workflow',
+        action='store_true',
+        help='Show the retrieval, ranking, and self-check workflow summary',
+    )
 
     args = parser.parse_args()
 
-    songs = load_songs(args.csv)
+    try:
+        songs = load_songs(args.csv)
 
-    if args.interactive:
-        user_prefs = prompt_for_profile()
-    else:
-        # Build from CLI args, fall back to a sensible default if nothing provided
-        user_prefs = build_user_prefs_from_args(args)
-        if not user_prefs:
-            # default example profile
-            user_prefs = {"genre": "pop", "mood": "happy", "energy": 0.8}
+        if args.interactive:
+            user_prefs = prompt_for_profile()
+        else:
+            # Build from CLI args, fall back to a sensible default if nothing provided
+            user_prefs = build_user_prefs_from_args(args)
+            if not user_prefs:
+                # default example profile
+                user_prefs = {"genre": "pop", "mood": "happy", "energy": 0.8}
 
-    recommendations = recommend_songs(user_prefs, songs, k=args.k)
+        recommendations, trace = recommend_songs(
+            user_prefs, songs, k=args.k, return_trace=True
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        parser.exit(status=1, message=f"Error: {exc}\n")
 
-    # Build rows for table: Rank, Title, Artist, Score, Reasons
     rows = []
     for i, rec in enumerate(recommendations, start=1):
         song, score, explanation = rec
@@ -113,6 +122,15 @@ def main() -> None:
     table = format_table(rows)
     print('\nTop recommendations:\n')
     print(table)
+    print(f"\nConfidence: {trace.confidence:.2f}")
+    if trace.warnings:
+        print("Warnings:")
+        for warning in trace.warnings:
+            print(f"- {warning}")
+    if args.show_workflow:
+        print("\nWorkflow:")
+        for step in trace.steps:
+            print(f"- {step.name}: {step.detail}")
 
 
 if __name__ == "__main__":

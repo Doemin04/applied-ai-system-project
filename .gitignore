@@ -13,3 +13,7 @@ venv/
 
 # Pytest cache
 .pytest_cache/
+
+# Local runtime artifacts
+logs/
+*.log

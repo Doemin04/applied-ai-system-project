@@ -1,281 +1,244 @@
-# 🎵 Music Recommender Simulation
+# Music Recommender Workflow
 
-## Project Summary
+## Title and Summary
 
-In this project you will build and explain a small music recommender system.
+This project is an explainable music recommender that matches a user taste profile to songs in a local catalog. It recommends tracks using genre, mood, and numeric audio-style features such as energy, tempo, valence, danceability, and acousticness, then explains why each result was chosen.
 
-Your goal is to:
+The original project from Modules 1-3 was **Music Recommender Simulation**. Its original goal was to show how a small content-based recommender could turn a user profile and song metadata into ranked suggestions. In this extended version, I kept that scoring foundation and added an integrated retrieval step, an observable recommendation workflow, confidence scoring, logging, and an evaluation harness so the system behaves more like a complete AI application rather than a single scoring function.
 
-- Represent songs and a user "taste profile" as data
-- Design a scoring rule that turns that data into recommendations
-- Evaluate what your system gets right and wrong
-- Reflect on how this mirrors real world AI recommenders
+## Why It Matters
 
-Replace this paragraph with your own summary of what your version does.
+Recommendation systems are one of the most common real-world AI applications. Even in a small classroom-scale project, they show the same trade-offs seen in production systems: retrieval vs. ranking, explainability vs. complexity, and personalization vs. bias.
 
----
+## Main AI Features
 
-## How The System Works
+- **Agentic workflow**: the system now performs a visible multi-step process: validate inputs, retrieve likely candidates, rank them, and run a self-check before final output.
+- **Retrieval-enhanced recommendation**: instead of scoring the entire catalog blindly, the system first retrieves the most promising songs based on the active preference signals.
+- **Reliability system**: the app logs its behavior, reports confidence, warns when results are weak or unstable, and includes repeatable tests and an evaluation script.
 
-This project simulates how a simple content-based music recommender connects a user's taste to song attributes. Real-world systems combine collaborative signals (other users' behavior), content signals (audio + metadata), and contextual priors; this simulation will focus on content signals (the song's numeric "vibe" features and categorical tags) and a small popularity prior that acts as a fallback.
+## Architecture Overview
 
-Step 1 — Catalog and extended data
-- I inspected `data/songs.csv` (now 18 songs). Available fields are: id, title, artist, genre, mood, energy, tempo_bpm, valence, danceability, acousticness. I added 8 diverse songs (IDs 11–18) covering classical, metal, reggae, hip hop, country, blues, electronic, and folk so the simulator can exercise different textures and moods.
-- Suggested additional numeric features (optional for later):
-  - instrumentalness (0–1): how much of the track is instrumental (helps separate vocal hip-hop from instrumental ambient)
-  - liveness (0–1): how much the track sounds live vs studio (useful for folk/blues/rock)
-  - speechiness (0–1): presence of spoken words/rap (useful for hip hop / podcasts)
-  - loudness_db (numeric): average loudness in dB (normalize before use)
-  - tempo_variability (0–1): how stable the tempo is (helps detect electronic loops vs human-played tempos)
+The recommender is organized into a small but complete pipeline:
 
-Step 2 — Example UserProfile (taste sketch)
-- name: "Evening Chill"
-- preferred_genres: {lofi, ambient, folk}
-- preferred_moods: {chill, contemplative}
-- numeric_preferences:
-  - energy: 0.35
-  - valence: 0.60
-  - danceability: 0.45
-  - acousticness: 0.85
-  - tempo_bpm: 75   # target BPM (we normalize to dataset tempo range in code)
-- α (content vs popularity) = 0.85  # prefer content matching over popularity
+1. The CLI accepts user preferences or falls back to a default profile.
+2. The validator checks ranges and normalizes inputs.
+3. A candidate retriever pulls the most promising songs from the catalog.
+4. The scorer ranks those candidates with the existing content-based matching logic.
+5. A self-check applies a small diversity guardrail when repeated artists dominate the top results.
+6. The system returns recommendations, confidence, warnings, and a workflow trace.
+7. Logs and evaluation scripts make the behavior inspectable.
 
-Profile critique: this profile is intentionally specific to favor low-energy, acoustic, contemplative tracks. It will clearly differentiate "intense rock" (energy ~0.9, low acousticness) from "chill lofi" (energy ~0.3–0.4, high acousticness) because numeric features like energy and acousticness are strongly different. However, it may be too narrow if the user also likes occasional higher-energy tracks of a preferred mood; add a per-feature tolerance σ_f or allow multiple preferred_genres to increase flexibility.
+### System Diagram
 
-Step 3 — Finalized Algorithm Recipe (Scoring + Ranking)
-Overview: For each song S and user profile P we produce a FinalScore(S|P) in [0,1] and return the top-K by FinalScore. FinalScore blends a content-based score with a small popularity prior.
-
-1) Per-feature closeness (numeric features)
-- Normalize numeric features into [0,1] (tempo normalized by dataset min/max or by mapping BPM to perceptual range).
-- Use a Gaussian kernel for closeness:
-  score_f = exp( - (s_f - u_f)^2 / (2 * σ_f^2) )
-  - σ_f controls tolerance. Suggested defaults: σ_energy=0.12, σ_valence=0.15, σ_danceability=0.12, σ_acousticness=0.15, σ_tempo=0.10 (tempo after scaling to 0–1).
-
-2) Categorical matching (genre/mood)
-- genre_match = 1.0 if song.genre ∈ user.preferred_genres else 0.0 (or soft similarity if genres are embedded).
-- mood_match = 1.0 if any mood tag overlaps else 0.0 (or Jaccard for multi-label moods).
-
-3) Per-song ContentScore (combine features)
-- Weighted sum (weights chosen to reflect importance; numeric weights sum to 1 in the numeric block):
-  ContentScore = (W_genre * genre_match + W_mood * mood_match + sum_{f in numeric} w_f * score_f) / Z
-  where Z is the maximum possible (to keep ContentScore in [0,1]).
-
-Suggested weights (starting defaults):
-- W_genre = 0.30   # genre is structural and informative
-- W_mood = 0.12    # mood tags helpful but noisier
-- Numeric block (total = 0.58): energy 0.18, valence 0.15, danceability 0.10, acousticness 0.10, tempo 0.05
-
-Note: these values reflect the small catalog in `data/songs.csv`; genre is deliberately stronger than a single mood tag because genre often encodes instrumentation and production that numeric features don't fully capture.
-
-4) Popularity prior and final blending
-- If PopScore is available (0–1), compute FinalScore = α * ContentScore + (1−α) * PopScore (α from profile or system default e.g., 0.85).
-
-5) Ranking rule and list-level adjustments
-- Sort candidates by FinalScore descending.
-- Optional re-ranking: apply an MMR-style step to improve diversity:
-  pick next item x maximizing λ*FinalScore(x) - (1−λ)*max_{selected y} sim(x,y), with λ≈0.8.
-- Apply simple dedup rules (no more than 2 songs by the same artist in top-10).
-
-Practical scoring example (point form for intuition):
-- +2.0 points for genre match (equivalent to W_genre=0.30 after normalization)
-- +1.0 point for mood match (≈W_mood)
-- numeric closeness contributes up to +2.0 points total (split among features, scaled by closeness)
-- Normalize total to [0,1] for blending with PopScore.
-
-Step 4 — Data flow (visual)
 ```mermaid
 flowchart TD
-  A[User Preferences] --> B[Load CSV Catalog]
-  B --> C[For each song: compute per-feature closeness]
-  C --> D[Combine with weights -> ContentScore]
-  D --> E[Blend with PopScore (α)]
-  E --> F[Sort by FinalScore]
-  F --> G[Optional: Diversity re-rank / dedup]
-  G --> H[Top-K Recommendations]
+    A[User Input or CLI Flags] --> B[Preference Validator]
+    B --> C[Candidate Retriever]
+    C --> D[Song Scorer]
+    D --> E[Self-Check and Diversity Guardrail]
+    E --> F[Recommendations + Explanations]
+    E --> G[Confidence + Warnings]
+    B --> H[Logging]
+    C --> H
+    D --> H
+    E --> H
+    I[Automated Tests] --> D
+    J[Evaluation Harness] --> G
+    K[Human Review of Outputs] --> F
+```
+![System Architecture Diagram](assets/system-architecture.png)
+
+## Repository Structure
+
+```text
+data/
+  songs.csv              Small local song catalog
+src/
+  main.py                CLI entry point
+  recommender.py         Retrieval, scoring, workflow, logging
+  evaluate.py            Reliability / evaluation harness
+tests/
+  test_recommender.py    Directly runnable automated tests
+model_card.md            Model card and reflection
 ```
 
-Step 5 — Biases and notes
-- This simple content-based system will naturally favor songs that share explicit genre tags and numeric features with the user; it may under-recommend songs that match mood but not genre (risk: over-prioritize genre). Because the numeric features are hand-tuned and the catalog is small, the model may overfit to the dataset's genre/mood distribution. Be explicit about tolerances (σ_f) so users who like variety can be served more diverse results.
+## Setup Instructions
 
-📍Checkpoint: the plan defines the extended catalog, a concrete UserProfile example, the per-song Scoring Rule (Gaussian closeness + categorical boosts), the FinalScore blending (α), and the list-level Ranking Rule (sort + optional MMR). With this, we're ready to implement the scorer and a small re-ranker in code.
+1. Create and activate a virtual environment if you want isolation.
 
----
+```bash
+python -m venv .venv
+```
 
-## Getting Started
+Windows:
 
-### Setup
+```bash
+.venv\Scripts\activate
+```
 
-1. Create a virtual environment (optional but recommended):
+macOS or Linux:
 
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate      # Mac or Linux
-   .venv\Scripts\activate         # Windows
+```bash
+source .venv/bin/activate
+```
 
-2. Install dependencies
+2. Install dependencies.
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Run the app:
+3. Run the main recommender.
 
 ```bash
 python -m src.main
 ```
 
-### Running Tests
-
-Run the starter tests with:
+4. Run with a custom profile.
 
 ```bash
-pytest
+python -m src.main --genre lofi --mood chill --energy 0.4 -k 3 --show-workflow
 ```
 
-You can add more tests in `tests/test_recommender.py`.
+5. Run the automated tests.
 
----
+```bash
+python tests/test_recommender.py
+```
 
-## Experiments You Tried
+6. Run the evaluation harness.
 
-Use this section to document the experiments you ran. For example:
+```bash
+python -m src.evaluate
+```
 
-- What happened when you changed the weight on genre from 2.0 to 0.5
-- What happened when you added tempo or valence to the score
-- How did your system behave for different types of users
+## Sample Interactions
 
----
+### 1. Chill Lofi Listener
 
-## Limitations and Risks
+Input:
 
-Summarize some limitations of your recommender.
+```bash
+python -m src.main --genre lofi --mood chill --energy 0.4 -k 3 --show-workflow
+```
 
-Examples:
+Observed output:
 
-- It only works on a tiny catalog
-- It does not understand lyrics or language
-- It might over favor one genre or mood
+```text
+1. Midnight Coding   | score 1.00
+2. Library Rain      | score 0.98
+3. Focus Flow        | score 0.75
+Confidence: 0.81
+Warning: Top songs are very close in score, so ranking may be unstable.
+```
 
-You will go deeper on this in your model card.
+### 2. High-Energy Workout Listener
 
----
+Input:
 
-## Reflection
+```bash
+python -m src.main --genre pop --mood intense --energy 0.9 -k 3
+```
 
-Read and complete `model_card.md`:
+Observed output:
 
-[**Model Card**](model_card.md)
+```text
+1. Gym Hero          | score 0.99
+2. Sunrise City      | score 0.70
+3. Storm Runner      | score 0.50
+Confidence: 1.00
+```
 
-Write 1 to 2 paragraphs here about what you learned:
+### 3. Acoustic Reflective Listener
 
-- about how recommenders turn data into predictions
-- about where bias or unfairness could show up in systems like this
+Input:
 
+```bash
+python -m src.main --genre folk --mood contemplative --energy 0.33 --tempo 76 -k 3 --show-workflow
+```
 
----
+Observed output:
 
-## 7. `model_card_template.md`
+```text
+1. Autumn Walk       | score 1.00
+2. Library Rain      | score 0.39
+3. Focus Flow        | score 0.36
+Confidence: 1.00
+```
 
-Combines reflection and model card framing from the Module 3 guidance. :contentReference[oaicite:2]{index=2}  
+## Design Decisions
 
-```markdown
-# 🎧 Model Card - Music Recommender Simulation
+- I preserved the original content-based scoring logic instead of replacing it, because the earlier coursework already established a working baseline.
+- I added retrieval before scoring so the system now has a visible search-and-rank pipeline rather than a single opaque step.
+- I kept the scoring explainable with human-readable reasons instead of switching to a black-box model, which made testing and reflection easier.
+- I added confidence and warnings because recommendation quality can look plausible even when the score margins are weak.
+- I used a small artist-diversity guardrail as a safe post-processing step instead of aggressively rewriting the ranking logic.
 
-## 1. Model Name
+## Reliability and Evaluation
 
-Give your recommender a name, for example:
+This project includes three reliability mechanisms:
 
-> VibeFinder 1.0
+- **Automated tests**: `tests/test_recommender.py` checks sorting, explanations, validation, confidence traces, and acoustic preference behavior.
+- **Evaluation harness**: `src/evaluate.py` runs fixed scenarios and prints a summary.
+- **Logging and guardrails**: each recommendation run writes workflow information to `logs/recommender.log`, and the CLI surfaces warnings when match quality is low or unstable.
 
----
+### Current Testing Summary
 
-## 2. Intended Use
+- 5 out of 5 direct automated tests passed.
+- 4 out of 4 evaluation scenarios passed.
+- Average confidence across the evaluation harness was **0.78**.
+- The weakest scenario was the broad "energy-only" profile, which is expected because sparse user context makes ranking less certain.
 
-- What is this system trying to do
-- Who is it for
+## What Worked, What Did Not, and What I Learned
 
-Example:
+What worked well:
 
-> This model suggests 3 to 5 songs from a small catalog based on a user's preferred genre, mood, and energy level. It is for classroom exploration only, not for real users.
+- Exact genre and mood matches still create intuitive top recommendations.
+- The retrieval step keeps the system focused and makes the workflow easier to inspect.
+- Confidence warnings are useful for flagging cases that look plausible but are not strongly separated.
 
----
+What did not work as well:
 
-## 3. How It Works (Short Explanation)
+- Sparse profiles, such as only specifying energy, still produce lower-confidence outputs.
+- The small catalog limits variety and makes some rankings fragile when multiple songs are near-ties.
 
-Describe your scoring logic in plain language.
+What I learned:
 
-- What features of each song does it consider
-- What information about the user does it use
-- How does it turn those into a number
+- Even simple AI systems benefit from explicit workflow stages.
+- Retrieval, ranking, and evaluation are easier to reason about when separated.
+- Reliability features are not extras; they change how trustworthy the application feels.
 
-Try to avoid code in this section, treat it like an explanation to a non programmer.
+## Reflection and Ethics
 
----
+### Limitations and Biases
 
-## 4. Data
+- The catalog is tiny and hand-curated, so the system reflects the biases of the dataset more than real-world music diversity.
+- Genre labels are treated literally, which can over-reward exact tag matches and under-reward cross-genre similarity.
+- The system only uses structured metadata; it does not understand lyrics, culture, or personal context.
 
-Describe your dataset.
+### Possible Misuse and Prevention
 
-- How many songs are in `data/songs.csv`
-- Did you add or remove any songs
-- What kinds of genres or moods are represented
-- Whose taste does this data mostly reflect
+- A recommender like this could be misused to overfit users into narrow taste bubbles.
+- To reduce that risk, I added diversity repair, confidence warnings, and transparent explanations rather than presenting the rankings as absolute truth.
+- This project should be treated as an educational prototype, not an authority on music taste.
 
----
+### Reliability Surprise
 
-## 5. Strengths
+The most surprising result was how quickly confidence drops when the user profile becomes vague. A system can still output ranked songs, but the ranking becomes much less trustworthy when only one weak signal is available.
 
-Where does your recommender work well
+### Collaboration With AI
 
-You can think about:
-- Situations where the top results "felt right"
-- Particular user profiles it served well
-- Simplicity or transparency benefits
+AI was helpful when brainstorming how to extend the original recommender without discarding working code. One especially helpful suggestion was to separate the system into retrieval, ranking, and self-check stages, which made the architecture cleaner and easier to document.
 
----
+AI was less helpful when it leaned on environment assumptions that were not true in this workspace, especially around test execution tools. That suggestion was flawed because the available Python interpreter did not include the expected tooling, so I adjusted the project to use a directly runnable test file instead.
 
-## 6. Limitations and Bias
+## Future Improvements
 
-Where does your recommender struggle
+- Expand the catalog with more songs and richer metadata.
+- Add multi-label moods or soft similarity between genres.
+- Compare this explainable baseline against an embedding-based recommender.
+- Track user feedback over time so the system can adapt instead of relying only on static preferences.
 
-Some prompts:
-- Does it ignore some genres or moods
-- Does it treat all users as if they have the same taste shape
-- Is it biased toward high energy or one genre by default
-- How could this be unfair if used in a real product
+## Related Documentation
 
----
-
-## 7. Evaluation
-
-How did you check your system
-
-Examples:
-- You tried multiple user profiles and wrote down whether the results matched your expectations
-- You compared your simulation to what a real app like Spotify or YouTube tends to recommend
-- You wrote tests for your scoring logic
-
-You do not need a numeric metric, but if you used one, explain what it measures.
-
----
-
-## 8. Future Work
-
-If you had more time, how would you improve this recommender
-
-Examples:
-
-- Add support for multiple users and "group vibe" recommendations
-- Balance diversity of songs instead of always picking the closest match
-- Use more features, like tempo ranges or lyric themes
-
----
-
-## 9. Personal Reflection
-
-A few sentences about what you learned:
-
-- What surprised you about how your system behaved
-- How did building this change how you think about real music recommenders
-- Where do you think human judgment still matters, even if the model seems "smart"
-
+- [Model Card](model_card.md)
