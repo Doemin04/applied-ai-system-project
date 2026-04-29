@@ -30,23 +30,9 @@ The recommender is organized into a small but complete pipeline:
 
 ### System Diagram
 
-```mermaid
-flowchart TD
-    A[User Input or CLI Flags] --> B[Preference Validator]
-    B --> C[Candidate Retriever]
-    C --> D[Song Scorer]
-    D --> E[Self-Check and Diversity Guardrail]
-    E --> F[Recommendations + Explanations]
-    E --> G[Confidence + Warnings]
-    B --> H[Logging]
-    C --> H
-    D --> H
-    E --> H
-    I[Automated Tests] --> D
-    J[Evaluation Harness] --> G
-    K[Human Review of Outputs] --> F
-```
 ![System Architecture Diagram](assets/system-architecture.png)
+
+The diagram shows how data flows through the system: user input is validated, candidates are retrieved from the catalog, scored against the user profile, checked for diversity, and returned with confidence and warnings. Automated tests validate the scoring logic, and the evaluation harness measures reliability across scenarios.
 
 ## Repository Structure
 
@@ -239,6 +225,29 @@ AI was less helpful when it leaned on environment assumptions that were not true
 - Compare this explainable baseline against an embedding-based recommender.
 - Track user feedback over time so the system can adapt instead of relying only on static preferences.
 
+## Demo Walkthrough
+
+Watch a complete end-to-end demo of the system in action:
+
+**[Loom Video Walkthrough](https://www.loom.com/share/2c63cc4fb32540149a814972895d4e12)** 
+**[Loom Video Walkthrough-continue](https://www.loom.com/share/dd1f03210c534eb6830ec9154e61fb4b)** 
+
+The video demonstrates:
+1. Default recommendation with confidence scoring
+2. Custom lofi + chill profile with workflow trace showing retrieval, ranking, and self-check steps
+3. Evaluation harness results showing pass/fail outcomes and confidence averages
+
+For a detailed walkthrough of all demo scenarios with expected outputs, see [DEMO.md](DEMO.md).
+
+## Portfolio Reflection
+
+This project demonstrates my ability to build a complete, transparent AI system from design through evaluation. Rather than just implementing a scoring algorithm, I chose to wrap it in a multi-step agentic workflow with retrieval optimization, confidence estimation, automated testing, and logging. This reflects my understanding that trustworthy AI requires more than accuracy—it requires inspectability, guardrails, and honest uncertainty communication.
+
+A key insight I learned is that reliability features are not optional extras; confidence scoring, diversity repair, and warning messages fundamentally change how trustworthy an application feels. The workflow trace feature turned out to be especially valuable, making the recommendation decisions transparent enough to debug and audit.
+
+Future work would integrate user feedback signals, compare this rule-based approach against embedding-driven methods, or expand the catalog to production scale. The architecture I built is modular enough to support those extensions without major rewrites.
+
 ## Related Documentation
 
 - [Model Card](model_card.md)
+
